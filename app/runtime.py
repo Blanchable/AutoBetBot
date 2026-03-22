@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 import time
 import uuid
@@ -11,7 +11,8 @@ from connectors.gamma_client import GammaClient
 from dashboard.console_dashboard import render_dashboard
 from execution.exit_manager import check_exit
 from execution.order_router import OrderRequest, OrderRouter
-from models.enums import PositionStatus
+from models.enums import Asset, Horizon, PositionStatus
+from models.market import Market
 from models.portfolio import PortfolioState
 from models.position import Position
 from risk.portfolio_limits import check_limits
@@ -54,38 +55,56 @@ class BotRuntime:
             "books": list(self.latest_books_by_asset.values()),
         }
 
+    def _synthetic_markets(self, now: datetime) -> list[Market]:
+        """Fallback synthetic lanes so UI/runtime remain active without external APIs."""
+        return [
+            Market("sim-btc-5m", Asset.BTC, Horizon.M5, "sim-y-btc-5m", "sim-n-btc-5m", now + timedelta(minutes=4)),
+            Market("sim-eth-5m", Asset.ETH, Horizon.M5, "sim-y-eth-5m", "sim-n-eth-5m", now + timedelta(minutes=4)),
+            Market("sim-sol-5m", Asset.SOL, Horizon.M5, "sim-y-sol-5m", "sim-n-sol-5m", now + timedelta(minutes=4)),
+        ]
+
     def _lane_enabled(self, asset: str, horizon: str) -> bool:
         key = f"enable_{asset.lower()}_{'5m' if horizon == '5m' else '15m'}"
         return bool(getattr(self.settings, key, False))
 
     def run(self) -> None:
-        tracked = {}
+        tracked: dict[str, Market] = {}
         recent_rejections: list[str] = []
         last_discovery = 0.0
         self.running = True
         if self.settings.mode.value == "live":
             LOGGER.warning("MODE=live selected; live execution scaffold is not implemented in v1. Entries are skipped safely.")
+        LOGGER.info("runtime loop started")
+
         try:
             while self.running:
                 now = datetime.now(timezone.utc)
                 if time.time() - last_discovery > self.settings.discovery_interval_sec:
                     try:
                         discovered = self.gamma.discover_markets()
+                        if not discovered:
+                            raise RuntimeError("gamma returned zero markets")
                         tracked = {
                             m.market_id: m
                             for m in discovered
                             if m.is_active and self._lane_enabled(m.asset.value, m.horizon.value)
                         }
+                        if not tracked:
+                            raise RuntimeError("no enabled markets matched discovery")
                         self.last_discovered_count = len(tracked)
                         for m in tracked.values():
                             self.store.save_market(m)
-                        last_discovery = time.time()
                         LOGGER.info("discovered_markets=%s", len(tracked))
                     except Exception as exc:  # noqa: BLE001
                         self.last_error = str(exc)
-                        LOGGER.exception("market discovery failed; continuing safely: %s", exc)
-                        time.sleep(self.settings.poll_interval_ms / 1000)
-                        continue
+                        synthetic = self._synthetic_markets(now)
+                        tracked = {m.market_id: m for m in synthetic if self._lane_enabled(m.asset.value, m.horizon.value)}
+                        self.last_discovered_count = len(tracked)
+                        for m in tracked.values():
+                            self.store.save_market(m)
+                        LOGGER.warning("discovery unavailable; using synthetic markets (%s): %s", len(tracked), exc)
+                    finally:
+                        last_discovery = time.time()
 
                 candidates = []
                 concentration = defaultdict(int)

@@ -255,6 +255,8 @@ class ControlPanelApp:
     def _refresh_books_table(self, rows: list[dict[str, float | str]]) -> None:
         if not self.book_tree:
             return
+        if not rows:
+            return
         for item in self.book_tree.get_children():
             self.book_tree.delete(item)
         ordered = sorted(rows, key=lambda x: str(x.get('asset', '')))
