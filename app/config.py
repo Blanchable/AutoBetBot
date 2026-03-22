@@ -4,6 +4,13 @@ import os
 from models.enums import Mode
 
 
+def _parse_mode(value: str) -> Mode:
+    try:
+        return Mode(value)
+    except ValueError:
+        return Mode.PAPER
+
+
 def _as_bool(name: str, default: str = "1") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
@@ -61,7 +68,7 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
-            mode=Mode(os.getenv("MODE", "paper")),
+            mode=_parse_mode(os.getenv("MODE", "paper")),
             poll_interval_ms=int(os.getenv("POLL_INTERVAL_MS", "1000")),
             discovery_interval_sec=int(os.getenv("DISCOVERY_INTERVAL_SEC", "30")),
             sqlite_path=os.getenv("SQLITE_PATH", "autobetbot.db"),
