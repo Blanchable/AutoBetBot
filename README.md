@@ -5,14 +5,33 @@ Production-minded, Windows-first Python paper-trading bot scaffold for Polymarke
 - ETH 5m / 15m
 - SOL 5m / 15m
 
-## Quick start
+## Quick start (Windows, one-click)
+
+Double-click:
+
+```bat
+launch_control_panel.bat
+```
+
+The script will create `.venv`, install requirements, and launch the control panel.
+
+## Manual start
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-python -m app.main
+python -m ui.control_panel
 ```
+
+## Control Panel
+
+Tabs:
+- **Overview**: start/stop bot, discovered markets, candidates, open positions, deployed capital, realized PnL, and last error.
+- **Settings**: adjust risk size (`MAX_POSITION_SIZE_DOLLARS`), risk fraction, TP (`TP_PRICE`), SL (`SL_PRICE`), and other key limits.
+- **Polymarket Keys**: store API key/secret/passphrase.
+
+Settings are persisted to `.env` and applied when starting the bot.
 
 ## Default paper-mode settings
 

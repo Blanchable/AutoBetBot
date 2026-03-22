@@ -41,7 +41,7 @@ def test_favorite_detection_and_spread():
 
 
 def test_seconds_to_expiry_filters():
-    s = Settings()
+    s = Settings.from_env()
     m = _market(Horizon.M5)
     d = evaluate_market(s, m, _book(), seconds_left=30, min_required_depth=10)
     assert d.candidate is None
@@ -49,14 +49,14 @@ def test_seconds_to_expiry_filters():
 
 
 def test_entry_eligibility_logic_passes():
-    s = Settings()
+    s = Settings.from_env()
     m = _market(Horizon.M5)
     d = evaluate_market(s, m, _book(), seconds_left=120, min_required_depth=10)
     assert d.candidate is not None
 
 
 def test_tp_sl_and_time_stop_logic():
-    s = Settings()
+    s = Settings.from_env()
     p = Position("p1", "m1", Asset.BTC, Horizon.M5, Side.YES, 0.86, 10, 0.95, 0.75, 20)
     tp = check_exit(s, p, _book(yes_bid=0.96, yes_ask=0.97), seconds_left=120)
     assert tp.should_exit and tp.reason.value == "take_profit"
@@ -85,7 +85,7 @@ def test_ranking_logic():
 
 
 def test_portfolio_limit_and_cooldown_enforcement():
-    s = Settings()
+    s = Settings.from_env()
     portfolio = PortfolioState(bankroll=1000)
     signal = CandidateSignal(Asset.BTC, Horizon.M5, "m1", Side.YES, 0.9, 0.89, 0.9, 0.01, 300, 100, "ok")
     ok = check_limits(s, portfolio, signal, estimated_notional=50, now=datetime.now(timezone.utc))

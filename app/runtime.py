@@ -30,7 +30,25 @@ class BotRuntime:
         self.marketdata = ClobMarketData()
         self.router = OrderRouter(settings)
         self.portfolio = PortfolioState(bankroll=settings.bankroll)
-        self.running = True
+        self.running = False
+        self.last_candidate_count = 0
+        self.last_discovered_count = 0
+        self.last_error: str | None = None
+
+    def stop(self) -> None:
+        self.running = False
+
+    def snapshot(self) -> dict[str, str | float | int]:
+        return {
+            "running": int(self.running),
+            "bankroll": self.portfolio.bankroll,
+            "deployed": self.portfolio.deployed_capital,
+            "open_positions": len(self.portfolio.open_positions),
+            "realized_pnl": self.portfolio.realized_pnl,
+            "candidate_count": self.last_candidate_count,
+            "discovered_count": self.last_discovered_count,
+            "last_error": self.last_error or "",
+        }
 
     def _lane_enabled(self, asset: str, horizon: str) -> bool:
         key = f"enable_{asset.lower()}_{'5m' if horizon == '5m' else '15m'}"
@@ -40,6 +58,7 @@ class BotRuntime:
         tracked = {}
         recent_rejections: list[str] = []
         last_discovery = 0.0
+        self.running = True
         try:
             while self.running:
                 now = datetime.now(timezone.utc)
@@ -51,11 +70,13 @@ class BotRuntime:
                             for m in discovered
                             if m.is_active and self._lane_enabled(m.asset.value, m.horizon.value)
                         }
+                        self.last_discovered_count = len(tracked)
                         for m in tracked.values():
                             self.store.save_market(m)
                         last_discovery = time.time()
                         LOGGER.info("discovered_markets=%s", len(tracked))
                     except Exception as exc:  # noqa: BLE001
+                        self.last_error = str(exc)
                         LOGGER.exception("market discovery failed; continuing safely: %s", exc)
                         time.sleep(self.settings.poll_interval_ms / 1000)
                         continue
@@ -85,6 +106,7 @@ class BotRuntime:
                     candidates.append((decision.candidate, book))
 
                 candidates.sort(key=lambda x: x[0].ranking_score, reverse=True)
+                self.last_candidate_count = len(candidates)
 
                 for signal, book in candidates:
                     size = size_for_trade(self.settings, self.portfolio.bankroll, signal.asset, signal.best_ask)
@@ -150,3 +172,5 @@ class BotRuntime:
         except KeyboardInterrupt:
             LOGGER.info("graceful shutdown requested")
             self.running = False
+        finally:
+            LOGGER.info("runtime stopped")
