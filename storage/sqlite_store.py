@@ -1,4 +1,5 @@
 import sqlite3
+import threading
 from datetime import datetime, timezone
 
 from models.book import MarketBook
@@ -10,17 +11,25 @@ from storage.schema import DDL
 
 class SQLiteStore:
     def __init__(self, path: str):
-        self.conn = sqlite3.connect(path)
+        # Allow use from worker thread started by Tkinter control panel.
+        self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        self._lock = threading.Lock()
         self._init_schema()
 
+    def _execute(self, sql: str, params: tuple = ()) -> None:
+        with self._lock:
+            self.conn.execute(sql, params)
+            self.conn.commit()
+
     def _init_schema(self) -> None:
-        for stmt in DDL:
-            self.conn.execute(stmt)
-        self.conn.commit()
+        with self._lock:
+            for stmt in DDL:
+                self.conn.execute(stmt)
+            self.conn.commit()
 
     def save_market(self, market: Market) -> None:
-        self.conn.execute(
+        self._execute(
             """
             INSERT INTO markets (market_id, asset, horizon, yes_token_id, no_token_id, end_time, is_active, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -40,10 +49,9 @@ class SQLiteStore:
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
-        self.conn.commit()
 
     def save_book_snapshot(self, book: MarketBook) -> None:
-        self.conn.execute(
+        self._execute(
             """INSERT INTO book_snapshots (market_id, ts_epoch_ms, yes_bid, yes_ask, no_bid, no_ask, yes_bid_size, yes_ask_size, no_bid_size, no_ask_size)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
@@ -59,10 +67,9 @@ class SQLiteStore:
                 book.no.best_ask.size if book.no.best_ask else None,
             ),
         )
-        self.conn.commit()
 
     def save_signal(self, signal: CandidateSignal, accepted: bool, reason: str) -> None:
-        self.conn.execute(
+        self._execute(
             """INSERT INTO signals (ts, market_id, asset, horizon, side, mid, best_bid, best_ask, spread, seconds_left, score, accepted, reason)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
@@ -81,18 +88,16 @@ class SQLiteStore:
                 reason,
             ),
         )
-        self.conn.commit()
 
     def save_order(self, order_id: str, ts: datetime, market_id: str, is_entry: bool, status: str, reason: str, size: float, limit_price: float, fill_price: float | None, fill_size: float) -> None:
-        self.conn.execute(
+        self._execute(
             """INSERT OR REPLACE INTO orders (order_id, ts, market_id, is_entry, status, reason, size, limit_price, fill_price, fill_size)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (order_id, ts.isoformat(), market_id, 1 if is_entry else 0, status, reason, size, limit_price, fill_price, fill_size),
         )
-        self.conn.commit()
 
     def upsert_position(self, position: Position) -> None:
-        self.conn.execute(
+        self._execute(
             """INSERT OR REPLACE INTO positions (position_id, market_id, asset, horizon, side, entry_price, entry_size, target_price, stop_price, status, realized_pnl, entry_time, exit_time, exit_reason)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
@@ -112,4 +117,3 @@ class SQLiteStore:
                 position.exit_reason.value if position.exit_reason else None,
             ),
         )
-        self.conn.commit()
