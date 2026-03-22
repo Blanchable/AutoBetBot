@@ -6,7 +6,6 @@ import uuid
 
 from app.config import Settings
 from connectors.clob_marketdata import ClobMarketData
-from connectors.clob_trading import ClobTrading
 from connectors.gamma_client import GammaClient
 from dashboard.console_dashboard import render_dashboard
 from execution.exit_manager import check_exit
@@ -29,19 +28,17 @@ class BotRuntime:
         self.store = SQLiteStore(settings.sqlite_path)
         self.gamma = GammaClient()
         self.marketdata = ClobMarketData()
-        self.live_trading = ClobTrading()
         self.router = OrderRouter(settings)
         self.portfolio = PortfolioState(bankroll=settings.bankroll)
         self.running = False
         self.last_candidate_count = 0
         self.last_discovered_count = 0
         self.last_error: str | None = None
-        self.latest_books_by_asset: dict[str, dict[str, float | str]] = {}
 
     def stop(self) -> None:
         self.running = False
 
-    def snapshot(self) -> dict[str, str | float | int | list[dict[str, float | str]]]:
+    def snapshot(self) -> dict[str, str | float | int]:
         return {
             "running": int(self.running),
             "bankroll": self.portfolio.bankroll,
@@ -51,7 +48,6 @@ class BotRuntime:
             "candidate_count": self.last_candidate_count,
             "discovered_count": self.last_discovered_count,
             "last_error": self.last_error or "",
-            "books": list(self.latest_books_by_asset.values()),
         }
 
     def _lane_enabled(self, asset: str, horizon: str) -> bool:
@@ -63,8 +59,6 @@ class BotRuntime:
         recent_rejections: list[str] = []
         last_discovery = 0.0
         self.running = True
-        if self.settings.mode.value == "live":
-            LOGGER.warning("MODE=live selected; live execution scaffold is not implemented in v1. Entries will be skipped safely.")
         try:
             while self.running:
                 now = datetime.now(timezone.utc)
@@ -96,16 +90,6 @@ class BotRuntime:
                     secs = market.seconds_to_expiry(now)
                     book = self.marketdata.get_book(market)
                     self.store.save_book_snapshot(book)
-                    self.latest_books_by_asset[market.asset.value] = {
-                        "asset": market.asset.value,
-                        "horizon": market.horizon.value,
-                        "yes_bid": round(book.yes.best_bid.price, 4) if book.yes.best_bid else 0.0,
-                        "yes_ask": round(book.yes.best_ask.price, 4) if book.yes.best_ask else 0.0,
-                        "yes_mid": round(book.yes.midpoint or 0.0, 4),
-                        "no_bid": round(book.no.best_bid.price, 4) if book.no.best_bid else 0.0,
-                        "no_ask": round(book.no.best_ask.price, 4) if book.no.best_ask else 0.0,
-                        "no_mid": round(book.no.midpoint or 0.0, 4),
-                    }
 
                     if is_stale(book.ts_epoch_ms, self.settings.stale_data_ms, now):
                         recent_rejections.append(f"{market.market_id}:stale_data")
@@ -125,10 +109,6 @@ class BotRuntime:
                 self.last_candidate_count = len(candidates)
 
                 for signal, book in candidates:
-                    if self.settings.mode.value == "live":
-                        LOGGER.warning("Skipping live entry for market=%s until live execution is implemented", signal.market_id)
-                        continue
-
                     size = size_for_trade(self.settings, self.portfolio.bankroll, signal.asset, signal.best_ask)
                     notional = size * signal.best_ask
                     limit = check_limits(self.settings, self.portfolio, signal, notional, now)

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import logging
 import os
 from pathlib import Path
-import queue
 import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -13,18 +11,6 @@ from app.runtime import BotRuntime
 from utils.logging_utils import configure_logging
 
 ENV_PATH = Path('.env')
-
-
-class TkLogHandler(logging.Handler):
-    def __init__(self, sink: queue.Queue[str]):
-        super().__init__()
-        self.sink = sink
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            self.sink.put_nowait(self.format(record))
-        except Exception:  # noqa: BLE001
-            pass
 
 
 def load_env_file(path: Path = ENV_PATH) -> dict[str, str]:
@@ -51,7 +37,7 @@ class ControlPanelApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title('AutoBetBot Control Panel')
-        self.root.geometry('980x650')
+        self.root.geometry('760x520')
 
         self.runtime: BotRuntime | None = None
         self.runtime_thread: threading.Thread | None = None
@@ -67,33 +53,10 @@ class ControlPanelApp:
 
         self.settings_fields: dict[str, tk.StringVar] = {}
         self.key_fields: dict[str, tk.StringVar] = {}
-        self.mode_var = tk.StringVar(value='paper')
-
-        self.book_tree: ttk.Treeview | None = None
-        self.log_text: tk.Text | None = None
-        self.log_queue: queue.Queue[str] = queue.Queue()
 
         self._build_ui()
-        self._wire_log_capture()
         self._load_existing_settings()
-        self._seed_books_table()
-        self._append_log("Control panel ready. Use Settings tab to switch paper/live mode.")
         self._refresh_status_loop()
-
-
-    def _append_log(self, line: str) -> None:
-        if self.log_text is None:
-            return
-        self.log_text.insert('end', line + '\n')
-        self.log_text.see('end')
-
-    def _seed_books_table(self) -> None:
-        if not self.book_tree:
-            return
-        for item in self.book_tree.get_children():
-            self.book_tree.delete(item)
-        for asset in ('BTC', 'ETH', 'SOL'):
-            self.book_tree.insert('', 'end', values=(asset, 'n/a', '-', '-', '-', '-', '-', '-'))
 
     def _build_ui(self) -> None:
         notebook = ttk.Notebook(self.root)
@@ -102,20 +65,14 @@ class ControlPanelApp:
         overview_tab = ttk.Frame(notebook)
         settings_tab = ttk.Frame(notebook)
         keys_tab = ttk.Frame(notebook)
-        books_tab = ttk.Frame(notebook)
-        logs_tab = ttk.Frame(notebook)
 
         notebook.add(overview_tab, text='Overview')
         notebook.add(settings_tab, text='Settings')
         notebook.add(keys_tab, text='Polymarket Keys')
-        notebook.add(books_tab, text='Books Monitor')
-        notebook.add(logs_tab, text='Logs')
 
         self._build_overview(overview_tab)
         self._build_settings(settings_tab)
         self._build_keys(keys_tab)
-        self._build_books(books_tab)
-        self._build_logs(logs_tab)
 
     def _build_overview(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text='Bot status:', font=('Segoe UI', 11, 'bold')).pack(anchor='w', pady=(8, 2), padx=8)
@@ -145,10 +102,7 @@ class ControlPanelApp:
         frm = ttk.Frame(parent)
         frm.pack(fill='x', padx=12, pady=12)
 
-        ttk.Label(frm, text='Mode').grid(row=0, column=0, sticky='w', pady=4)
-        ttk.Combobox(frm, textvariable=self.mode_var, values=['paper', 'live'], state='readonly', width=25).grid(row=0, column=1, sticky='w', pady=4)
-
-        for row, (key, label) in enumerate(fields, start=1):
+        for row, (key, label) in enumerate(fields):
             ttk.Label(frm, text=label).grid(row=row, column=0, sticky='w', pady=4)
             var = tk.StringVar()
             self.settings_fields[key] = var
@@ -173,34 +127,6 @@ class ControlPanelApp:
 
         ttk.Button(parent, text='Save Keys', command=self.save_keys).pack(anchor='w', padx=12, pady=8)
 
-    def _build_books(self, parent: ttk.Frame) -> None:
-        columns = ('asset', 'horizon', 'yes_bid', 'yes_ask', 'yes_mid', 'no_bid', 'no_ask', 'no_mid')
-        tree = ttk.Treeview(parent, columns=columns, show='headings', height=14)
-        for col in columns:
-            tree.heading(col, text=col.upper())
-            tree.column(col, width=100 if col not in {'asset', 'horizon'} else 80)
-        tree.pack(fill='both', expand=True, padx=10, pady=10)
-        self.book_tree = tree
-
-    def _build_logs(self, parent: ttk.Frame) -> None:
-        text = tk.Text(parent, wrap='none', height=20)
-        yscroll = ttk.Scrollbar(parent, orient='vertical', command=text.yview)
-        xscroll = ttk.Scrollbar(parent, orient='horizontal', command=text.xview)
-        text.configure(yscrollcommand=yscroll.set, xscrollcommand=xscroll.set)
-
-        text.grid(row=0, column=0, sticky='nsew')
-        yscroll.grid(row=0, column=1, sticky='ns')
-        xscroll.grid(row=1, column=0, sticky='ew')
-        parent.grid_rowconfigure(0, weight=1)
-        parent.grid_columnconfigure(0, weight=1)
-
-        self.log_text = text
-
-    def _wire_log_capture(self) -> None:
-        handler = TkLogHandler(self.log_queue)
-        handler.setFormatter(logging.Formatter('%(asctime)s | %(levelname)s | %(name)s | %(message)s'))
-        logging.getLogger().addHandler(handler)
-
     def _load_existing_settings(self) -> None:
         values = load_env_file()
         defaults = {
@@ -211,18 +137,14 @@ class ControlPanelApp:
             'SL_PRICE': '0.75',
             'MAX_OPEN_POSITIONS_GLOBAL': '4',
             'MAX_CAPITAL_DEPLOYED_FRACTION': '0.4',
-            'MODE': 'paper',
         }
-        self.mode_var.set(values.get('MODE', defaults['MODE']))
         for key, var in self.settings_fields.items():
             var.set(values.get(key, defaults.get(key, '')))
         for key, var in self.key_fields.items():
             var.set(values.get(key, ''))
 
     def save_settings(self) -> None:
-        values = {k: v.get().strip() for k, v in self.settings_fields.items()}
-        values['MODE'] = self.mode_var.get().strip()
-        save_env_file(values)
+        save_env_file({k: v.get().strip() for k, v in self.settings_fields.items()})
         messagebox.showinfo('Saved', 'Settings saved to .env')
 
     def save_keys(self) -> None:
@@ -244,42 +166,12 @@ class ControlPanelApp:
         self.runtime = BotRuntime(settings)
         self.runtime_thread = threading.Thread(target=self.runtime.run, daemon=True)
         self.runtime_thread.start()
-        self.status_var.set(f'Running ({settings.mode.value})')
-        self._append_log(f'Runtime started in {settings.mode.value} mode')
+        self.status_var.set('Running')
 
     def stop_bot(self) -> None:
         if self.runtime:
             self.runtime.stop()
         self.status_var.set('Stopped')
-        self._append_log('Runtime stopped')
-
-    def _refresh_books_table(self, rows: list[dict[str, float | str]]) -> None:
-        if not self.book_tree:
-            return
-        for item in self.book_tree.get_children():
-            self.book_tree.delete(item)
-        ordered = sorted(rows, key=lambda x: str(x.get('asset', '')))
-        for row in ordered:
-            self.book_tree.insert('', 'end', values=(
-                row.get('asset', ''),
-                row.get('horizon', ''),
-                row.get('yes_bid', ''),
-                row.get('yes_ask', ''),
-                row.get('yes_mid', ''),
-                row.get('no_bid', ''),
-                row.get('no_ask', ''),
-                row.get('no_mid', ''),
-            ))
-
-    def _flush_log_queue(self) -> None:
-        if not self.log_text:
-            return
-        while True:
-            try:
-                line = self.log_queue.get_nowait()
-            except queue.Empty:
-                break
-            self._append_log(line)
 
     def _refresh_status_loop(self) -> None:
         if self.runtime:
@@ -290,9 +182,7 @@ class ControlPanelApp:
             self.snapshot_vars['deployed'].set(f"{float(snap['deployed']):.2f}")
             self.snapshot_vars['realized_pnl'].set(f"{float(snap['realized_pnl']):.2f}")
             self.snapshot_vars['last_error'].set(str(snap['last_error']))
-            self._refresh_books_table(snap.get('books', []))
 
-        self._flush_log_queue()
         self.root.after(1000, self._refresh_status_loop)
 
 
