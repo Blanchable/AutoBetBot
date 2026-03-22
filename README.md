@@ -22,8 +22,10 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 python -m ui.control_panel
-# or
-python -m app.main  # launches control panel UI
+# or (default entrypoint -> GUI)
+python -m app.main
+# or headless runtime
+set APP_HEADLESS=1 && python -m app.main
 ```
 
 ## Control Panel
