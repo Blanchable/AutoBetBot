@@ -28,8 +28,10 @@ python -m ui.control_panel
 
 Tabs:
 - **Overview**: start/stop bot, discovered markets, candidates, open positions, deployed capital, realized PnL, and last error.
-- **Settings**: adjust risk size (`MAX_POSITION_SIZE_DOLLARS`), risk fraction, TP (`TP_PRICE`), SL (`SL_PRICE`), and other key limits.
+- **Settings**: toggle `MODE` (`paper` / `live`) and adjust risk size (`MAX_POSITION_SIZE_DOLLARS`), risk fraction, TP (`TP_PRICE`), SL (`SL_PRICE`), and key limits.
 - **Polymarket Keys**: store API key/secret/passphrase.
+- **Books Monitor**: live table of YES/NO bid, ask, and midpoint across BTC/ETH/SOL.
+- **Logs**: dedicated rolling runtime logs for troubleshooting.
 
 Settings are persisted to `.env` and applied when starting the bot.
 
